@@ -92,6 +92,16 @@ fn sanitize_text(input: &str) -> String {
     strip_curly_attributes_mut(&mut s);
     strip_image_signatures_mut(&mut s);
 
+    // v2: LLM context optimization (runs after all v1 conversions)
+    strip_details_mut(&mut s);
+    strip_callout_mut(&mut s);
+    strip_wrapper_tag_mut(&mut s, "synced-block");
+    convert_equations_mut(&mut s);
+    strip_columns_mut(&mut s);
+    convert_checkboxes_mut(&mut s);
+    convert_bookmarks_mut(&mut s);
+    convert_mention_dates_mut(&mut s);
+
     s
 }
 
@@ -360,6 +370,209 @@ fn clean_cell_content(content: &str) -> String {
     s.trim().to_string()
 }
 
+/// Strip <details>/<summary> tags, converting to **summary** + content.
+/// Uses innermost-first approach for nested details.
+fn strip_details_mut(s: &mut String) {
+    if !s.contains("<details") {
+        return;
+    }
+    // Innermost-first: loop until no more <details> without nested <details> inside
+    while let Some(start) = find_innermost(s, "details") {
+        let after = &s[start..];
+        let Some(close_offset) = after.find("</details>") else {
+            break;
+        };
+        let inner = &s[start + 9..start + close_offset]; // 9 = "<details>".len()
+        let content = convert_details_content(inner);
+        let end = start + close_offset + 10; // 10 = "</details>".len()
+        s.replace_range(start..end, &content);
+    }
+}
+
+/// Find the position of the innermost (non-nested) occurrence of a tag.
+fn find_innermost(s: &str, tag: &str) -> Option<usize> {
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
+    let mut search_from = 0;
+    while let Some(pos) = s[search_from..].find(&open) {
+        let abs = search_from + pos;
+        // Find matching close
+        let after_open = &s[abs + open.len()..];
+        let Some(gt) = after_open.find('>') else {
+            search_from = abs + open.len();
+            continue;
+        };
+        let content_start = abs + open.len() + gt + 1;
+        if let Some(close_pos) = s[content_start..].find(&close) {
+            let between = &s[content_start..content_start + close_pos];
+            // If no nested open tag inside, this is innermost
+            if !between.contains(&open) {
+                return Some(abs);
+            }
+        }
+        search_from = abs + open.len();
+    }
+    None
+}
+
+/// Convert the inner content of a <details> block.
+fn convert_details_content(inner: &str) -> String {
+    let trimmed = inner.trim();
+    if let Some(summary_start) = trimmed.find("<summary>") {
+        if let Some(summary_end) = trimmed.find("</summary>") {
+            let title = trimmed[summary_start + 9..summary_end].trim();
+            let body = trimmed[summary_end + 10..].trim();
+            if body.is_empty() {
+                return format!("**{title}**");
+            }
+            return format!("**{title}**\n\n{body}");
+        }
+    }
+    // No summary — just return content
+    trimmed.to_string()
+}
+
+/// Strip <callout> tags, extracting icon attribute if present.
+fn strip_callout_mut(s: &mut String) {
+    if !s.contains("<callout") {
+        return;
+    }
+    while let Some(start) = find_innermost(s, "callout") {
+        let after = &s[start..];
+        let Some(gt) = after.find('>') else { break };
+        let tag_header = &s[start..start + gt];
+        let icon = extract_attr(tag_header, "icon").or_else(|| extract_attr(tag_header, "emoji"));
+        let content_start = start + gt + 1;
+        let Some(close_offset) = s[content_start..].find("</callout>") else {
+            break;
+        };
+        let content = s[content_start..content_start + close_offset].trim();
+        let replacement = match icon {
+            Some(i) => format!("{i} {content}"),
+            None => content.to_string(),
+        };
+        let end = content_start + close_offset + 10;
+        s.replace_range(start..end, &replacement);
+    }
+}
+
+/// Strip a simple wrapper tag (no special attribute handling), innermost-first.
+fn strip_wrapper_tag_mut(s: &mut String, tag: &str) {
+    let open = format!("<{tag}>");
+    if !s.contains(&open) {
+        return;
+    }
+    let close = format!("</{tag}>");
+    while let Some(start) = find_innermost(s, tag) {
+        let after = &s[start..];
+        let Some(gt) = after.find('>') else { break };
+        let content_start = start + gt + 1;
+        let Some(close_offset) = s[content_start..].find(&close) else {
+            break;
+        };
+        let content = s[content_start..content_start + close_offset]
+            .trim()
+            .to_string();
+        let end = content_start + close_offset + close.len();
+        s.replace_range(start..end, &content);
+    }
+}
+
+/// Convert <equation> tags to $...$ inline math.
+fn convert_equations_mut(s: &mut String) {
+    replace_tag(s, "equation", |tag| {
+        let open_end = tag.find('>').unwrap_or(0) + 1;
+        let close_start = tag.rfind("</equation>").unwrap_or(tag.len());
+        let expr = tag[open_end..close_start].trim();
+        format!("${expr}$")
+    });
+}
+
+/// Strip <column-list>/<column> tags, joining columns with --- separator.
+fn strip_columns_mut(s: &mut String) {
+    if !s.contains("<column-list>") {
+        return;
+    }
+    let mut result = String::with_capacity(s.len());
+    let mut remaining = s.as_str();
+
+    while let Some(start) = remaining.find("<column-list>") {
+        result.push_str(&remaining[..start]);
+        let after = &remaining[start..];
+        if let Some(end_offset) = after.find("</column-list>") {
+            let inner = &after[13..end_offset]; // 13 = "<column-list>".len()
+            let columns = extract_columns(inner);
+            result.push_str(&columns.join("\n\n---\n\n"));
+            remaining = &after[end_offset + 14..]; // 14 = "</column-list>".len()
+        } else {
+            result.push_str(after);
+            remaining = "";
+        }
+    }
+    result.push_str(remaining);
+    *s = result;
+}
+
+/// Extract column contents from inside a <column-list>.
+fn extract_columns(html: &str) -> Vec<String> {
+    let mut columns = Vec::new();
+    let mut remaining = html;
+    while let Some(col_start) = remaining.find("<column>") {
+        let after = &remaining[col_start + 8..]; // 8 = "<column>".len()
+        if let Some(col_end) = after.find("</column>") {
+            columns.push(after[..col_end].trim().to_string());
+            remaining = &after[col_end + 9..]; // 9 = "</column>".len()
+        } else {
+            break;
+        }
+    }
+    columns
+}
+
+/// Convert <checkbox> tags to [x] or [ ] with trailing space.
+fn convert_checkboxes_mut(s: &mut String) {
+    replace_tag(s, "checkbox", |tag| {
+        let checked = extract_attr(tag, "checked").unwrap_or_default();
+        if checked == "true" {
+            "[x] ".to_string()
+        } else {
+            "[ ] ".to_string()
+        }
+    });
+}
+
+/// Convert <bookmark> tags to [text](url) or bare URL.
+fn convert_bookmarks_mut(s: &mut String) {
+    replace_tag(s, "bookmark", |tag| {
+        let url = extract_attr(tag, "url").unwrap_or_default();
+        // Check if self-closing (no content)
+        if tag.contains("/>") && !tag.contains("</bookmark>") {
+            return url;
+        }
+        // Paired tag: extract content
+        let open_end = tag.find('>').unwrap_or(0) + 1;
+        let close_start = tag.rfind("</bookmark>").unwrap_or(tag.len());
+        let text = tag[open_end..close_start].trim();
+        if text.is_empty() {
+            url
+        } else {
+            format!("[{text}]({url})")
+        }
+    });
+}
+
+/// Convert <mention-date> tags to date text.
+fn convert_mention_dates_mut(s: &mut String) {
+    replace_tag(s, "mention-date", |tag| {
+        let start_date = extract_attr(tag, "start").unwrap_or_default();
+        if let Some(end_date) = extract_attr(tag, "end") {
+            format!("{start_date} → {end_date}")
+        } else {
+            start_date
+        }
+    });
+}
+
 /// Normalize consecutive blank lines to max 2 (one blank line between content).
 fn normalize_blank_lines(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
@@ -587,5 +800,185 @@ mod tests {
         assert!(result.contains("| Col |"));
         assert!(!result.contains("X-Amz-Algorithm"));
         assert!(!result.contains("<empty-block/>"));
+    }
+
+    // === v2: LLM コンテキスト最適化 ===
+
+    // T-027: FR-019 — details/summary をテキスト化
+    #[test]
+    fn test_details_summary_to_text() {
+        assert_eq!(
+            sanitize("<details><summary>先週</summary>内容</details>"),
+            "**先週**\n\n内容"
+        );
+    }
+
+    // T-028: FR-020 — details summary なし
+    #[test]
+    fn test_details_no_summary() {
+        assert_eq!(sanitize("<details>中身だけ</details>"), "中身だけ");
+    }
+
+    // T-029: FR-021 — ネストした details
+    #[test]
+    fn test_nested_details() {
+        let input =
+            "<details><summary>外</summary><details><summary>内</summary>X</details></details>";
+        let result = sanitize(input);
+        assert!(result.contains("**外**"));
+        assert!(result.contains("**内**"));
+        assert!(result.contains("X"));
+        assert!(!result.contains("<details"));
+    }
+
+    // T-030: FR-019 — details マルチラインコンテンツ
+    #[test]
+    fn test_details_multiline() {
+        let input = "<details>\n<summary>タイトル</summary>\n\n- item1\n- item2\n\n</details>";
+        let result = sanitize(input);
+        assert!(result.contains("**タイトル**"));
+        assert!(result.contains("- item1"));
+        assert!(result.contains("- item2"));
+        assert!(!result.contains("<details"));
+    }
+
+    // T-031: FR-022 — callout を icon + 中身に変換
+    #[test]
+    fn test_callout_with_icon() {
+        assert_eq!(
+            sanitize("<callout icon=\"💡\">注意点</callout>"),
+            "💡 注意点"
+        );
+    }
+
+    // T-032: FR-022 — callout icon なし
+    #[test]
+    fn test_callout_no_icon() {
+        assert_eq!(sanitize("<callout>注意点</callout>"), "注意点");
+    }
+
+    // T-033: FR-023 — synced-block ラッパー除去
+    #[test]
+    fn test_synced_block_stripped() {
+        assert_eq!(
+            sanitize("<synced-block>共有コンテンツ</synced-block>"),
+            "共有コンテンツ"
+        );
+    }
+
+    // T-034: FR-024 — equation を $...$ に変換
+    #[test]
+    fn test_equation_wrapped() {
+        assert_eq!(
+            sanitize("<equation>x^2 + y^2 = z^2</equation>"),
+            "$x^2 + y^2 = z^2$"
+        );
+    }
+
+    // T-035: FR-025 — column-list を --- 区切りに変換
+    #[test]
+    fn test_column_list_separated() {
+        let input = "<column-list><column>左</column><column>右</column></column-list>";
+        assert_eq!(sanitize(input), "左\n\n---\n\n右");
+    }
+
+    // T-036: FR-026 — checkbox checked=true
+    #[test]
+    fn test_checkbox_checked() {
+        assert_eq!(sanitize("<checkbox checked=\"true\"/>タスク"), "[x] タスク");
+    }
+
+    // T-037: FR-027 — checkbox checked=false
+    #[test]
+    fn test_checkbox_unchecked() {
+        assert_eq!(
+            sanitize("<checkbox checked=\"false\"/>未完了"),
+            "[ ] 未完了"
+        );
+    }
+
+    // T-038: FR-028 — bookmark をリンクに変換
+    #[test]
+    fn test_bookmark_to_link() {
+        assert_eq!(
+            sanitize("<bookmark url=\"https://example.com\">参考</bookmark>"),
+            "[参考](https://example.com)"
+        );
+    }
+
+    // T-039: FR-029 — bookmark self-closing を URL に変換
+    #[test]
+    fn test_bookmark_self_closing() {
+        assert_eq!(
+            sanitize("<bookmark url=\"https://example.com\"/>"),
+            "https://example.com"
+        );
+    }
+
+    // T-040: FR-030 — mention-date を日付テキストに変換
+    #[test]
+    fn test_mention_date() {
+        assert_eq!(
+            sanitize("<mention-date start=\"2026-03-14\"/>"),
+            "2026-03-14"
+        );
+    }
+
+    // T-041: FR-031 — mention-date range を変換
+    #[test]
+    fn test_mention_date_range() {
+        assert_eq!(
+            sanitize("<mention-date start=\"2026-03-14\" end=\"2026-03-20\"/>"),
+            "2026-03-14 → 2026-03-20"
+        );
+    }
+
+    // T-042: FR-032 — コードブロック内の新規タグ保護
+    #[test]
+    fn test_code_block_preserves_v2_tags() {
+        let input = "```\n<checkbox checked=\"true\"/>\n<callout icon=\"💡\">test</callout>\n```";
+        let result = sanitize(input);
+        assert!(result.contains("<checkbox"));
+        assert!(result.contains("<callout"));
+    }
+
+    // T-043: FR-034 — details 内に table がある複合パターン
+    #[test]
+    fn test_details_with_table() {
+        let input =
+            "<details><summary>T</summary>\n<table>\n<tr>\n<td>A</td>\n</tr>\n</table>\n</details>";
+        let result = sanitize(input);
+        assert!(result.contains("**T**"));
+        assert!(result.contains("| A |"));
+        assert!(!result.contains("<details"));
+        assert!(!result.contains("<table"));
+    }
+
+    // T-044: ALL — v1+v2 全混合複合パターン
+    #[test]
+    fn test_v1_v2_composite() {
+        let input = concat!(
+            "## Section {color=\"gray_bg\"}\n",
+            "<details><summary>詳細</summary>",
+            "<callout icon=\"💡\">重要</callout>",
+            "</details>\n",
+            "<checkbox checked=\"true\"/>タスク\n",
+            "<equation>E=mc^2</equation>\n",
+            "<mention-page url=\"https://notion.so/page1\"/>\n",
+            "<bookmark url=\"https://example.com\">リンク</bookmark>"
+        );
+        let result = sanitize(input);
+        assert!(!result.contains("{color="));
+        assert!(result.contains("**詳細**"));
+        assert!(result.contains("💡 重要"));
+        assert!(result.contains("[x] タスク"));
+        assert!(result.contains("$E=mc^2$"));
+        assert!(result.contains("[Notion page](https://notion.so/page1)"));
+        assert!(result.contains("[リンク](https://example.com)"));
+        assert!(!result.contains("<details"));
+        assert!(!result.contains("<callout"));
+        assert!(!result.contains("<checkbox"));
+        assert!(!result.contains("<equation"));
+        assert!(!result.contains("<bookmark"));
     }
 }
