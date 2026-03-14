@@ -13,10 +13,12 @@ pub fn format_output(title: &str, markdown: &str, truncated_by_api: bool) -> For
             .push("Warning: Page content was truncated by Notion API (page too large)".to_string());
     }
 
+    let sanitized = crate::sanitize::sanitize(markdown);
+
     let mut output = if title.is_empty() {
-        markdown.to_string()
+        sanitized
     } else {
-        format!("# {title}\n\n{markdown}")
+        format!("# {title}\n\n{sanitized}")
     };
 
     if output.len() > MAX_OUTPUT_BYTES {
@@ -70,5 +72,15 @@ mod tests {
         let input = format!("{padding}あいうえお"); // 境界付近にマルチバイト
         let result = format_output("", &input, false);
         assert!(result.stdout.len() <= MAX_OUTPUT_BYTES);
+    }
+
+    // T-026: FR-018 — sanitize は body のみに適用される
+    #[test]
+    fn test_sanitize_applies_to_body_only() {
+        let result = format_output("Title {color=\"gray\"}", "<empty-block/>content", false);
+        // Title should still contain {color=...} — not sanitized
+        assert!(result.stdout.contains("{color=\"gray\"}"));
+        // Body should be sanitized — <empty-block/> removed
+        assert!(!result.stdout.contains("<empty-block/>"));
     }
 }
