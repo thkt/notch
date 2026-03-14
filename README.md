@@ -125,7 +125,8 @@ done
 2. **Parallel fetch** — `fetch_markdown` and `fetch_metadata` run concurrently via `tokio::try_join!`.
 3. **Retry** — 429 (rate-limited) responses retry using the `Retry-After` header. 5xx errors retry with exponential backoff (100ms, 200ms, 400ms). Up to 3 retries.
 4. **Title extraction** — Dynamically finds the title property from page metadata (works regardless of property name).
-5. **Output** — Prepends `# Title` heading, truncates at 100KB with UTF-8 boundary safety.
+5. **Sanitize** — Removes Notion-specific custom tags (`<empty-block/>`, `{color="..."}`, `<span>`, `<mention-*>`, `<checkbox>`, `<callout>`, `<details>`, etc.), converts HTML tables to Markdown pipe tables, and optimizes output for LLM consumption.
+6. **Output** — Prepends `# Title` heading, truncates at 100KB with UTF-8 boundary safety.
 
 ## Architecture
 
@@ -134,6 +135,7 @@ src/
 ├── main.rs       CLI entry point (clap), SIGPIPE handling
 ├── client.rs     Notion API client, URL parsing, retry logic
 ├── types.rs      API response types, title extraction
+├── sanitize.rs   Notion custom tag removal, HTML→Markdown conversion
 ├── markdown.rs   Output formatting, truncation
 └── lib.rs        Module re-exports
 ```
