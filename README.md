@@ -67,6 +67,27 @@ export NOTION_TOKEN="ntn_..."  # Required: https://www.notion.so/profile/integra
 
 Create an internal integration, then share the target pages with it.
 
+#### Where to set
+
+**Shell (terminal usage):**
+
+```sh
+# Add to ~/.zshenv
+export NOTION_TOKEN="ntn_..."
+```
+
+**Claude Code (tool / MCP usage):**
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "NOTION_TOKEN": "ntn_..."
+  }
+}
+```
+
 ### Claude Code integration
 
 Add to your project's `CLAUDE.md`:

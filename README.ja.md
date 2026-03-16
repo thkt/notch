@@ -67,6 +67,27 @@ export NOTION_TOKEN="ntn_..."  # 必須: https://www.notion.so/profile/integrati
 
 内部インテグレーションを作成し、対象ページをインテグレーションに共有してください。
 
+#### 設定場所
+
+**シェル（ターミナルから使う場合）:**
+
+```sh
+# ~/.zshenv に追記
+export NOTION_TOKEN="ntn_..."
+```
+
+**Claude Code（ツール / MCP 連携で使う場合）:**
+
+`~/.claude/settings.json` に追加:
+
+```json
+{
+  "env": {
+    "NOTION_TOKEN": "ntn_..."
+  }
+}
+```
+
 ### Claude Code 連携
 
 プロジェクトの `CLAUDE.md` に追加:
