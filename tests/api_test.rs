@@ -326,3 +326,175 @@ async fn test_fetch_retries_on_429_then_succeeds() {
 
     assert_eq!(resp.markdown, "retry success");
 }
+
+// T-001: FR-002 — retrieve_database が data_source_id を返す
+#[tokio::test]
+async fn test_retrieve_database_returns_data_sources() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/databases/db-id"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data_sources": [
+                {"id": "ds-123"}
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let resp = client.retrieve_database("db-id").await.unwrap();
+
+    assert_eq!(resp.data_sources.len(), 1);
+    assert_eq!(resp.data_sources[0].id, "ds-123");
+}
+
+// T-002: FR-002 — retrieve_database 404
+#[tokio::test]
+async fn test_retrieve_database_404() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/databases/missing-db"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+            "status": 404,
+            "code": "object_not_found",
+            "message": "Not found"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let err = client.retrieve_database("missing-db").await.unwrap_err();
+
+    assert!(matches!(err, NotchError::NotFoundOrForbidden));
+}
+
+// T-003: FR-003 — query_data_source が行を返す
+#[tokio::test]
+async fn test_query_data_source_returns_rows() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/data_sources/ds-123/query"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "results": [
+                {
+                    "id": "page-1",
+                    "properties": {
+                        "Name": {
+                            "type": "title",
+                            "title": [{"plain_text": "Task A"}]
+                        }
+                    }
+                }
+            ],
+            "has_more": false,
+            "next_cursor": null
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let resp = client.query_data_source("ds-123").await.unwrap();
+
+    assert_eq!(resp.results.len(), 1);
+    assert_eq!(resp.results[0].id, "page-1");
+    assert_eq!(resp.results[0].properties.property_text("Name"), "Task A");
+}
+
+// T-004: FR-003 — query_data_source 空結果
+#[tokio::test]
+async fn test_query_data_source_empty_results() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/data_sources/ds-empty/query"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "results": [],
+            "has_more": false,
+            "next_cursor": null
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let resp = client.query_data_source("ds-empty").await.unwrap();
+
+    assert!(resp.results.is_empty());
+}
+
+// T-025: FR-001 — E2E: retrieve DB → query data source → TSV 検証
+#[tokio::test]
+async fn test_query_e2e_retrieve_then_query() {
+    let server = MockServer::start().await;
+
+    // Step 1: retrieve_database returns data_source_id
+    Mock::given(method("GET"))
+        .and(path("/v1/databases/e2e-db"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data_sources": [{"id": "e2e-ds"}]
+        })))
+        .mount(&server)
+        .await;
+
+    // Step 2: query_data_source returns rows
+    Mock::given(method("POST"))
+        .and(path("/v1/data_sources/e2e-ds/query"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "results": [
+                {
+                    "id": "row-1",
+                    "properties": {
+                        "Name": {"type": "title", "title": [{"plain_text": "Item 1"}]},
+                        "Status": {"type": "select", "select": {"name": "Active"}}
+                    }
+                },
+                {
+                    "id": "row-2",
+                    "properties": {
+                        "Name": {"type": "title", "title": [{"plain_text": "Item 2"}]},
+                        "Status": {"type": "select", "select": {"name": "Done"}}
+                    }
+                }
+            ],
+            "has_more": false,
+            "next_cursor": null
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    // E2E flow
+    let db = client.retrieve_database("e2e-db").await.unwrap();
+    assert_eq!(db.data_sources[0].id, "e2e-ds");
+
+    let resp = client.query_data_source(&db.data_sources[0].id).await.unwrap();
+    assert_eq!(resp.results.len(), 2);
+
+    // Verify TSV output structure
+    let columns = resp.results[0].properties.sorted_names();
+    assert_eq!(columns, vec!["Name", "Status"]);
+
+    let header = format!("id\t{}", columns.join("\t"));
+    assert_eq!(header, "id\tName\tStatus");
+
+    let row1_values: Vec<String> = columns
+        .iter()
+        .map(|col| resp.results[0].properties.property_text(col))
+        .collect();
+    assert_eq!(
+        format!("{}\t{}", resp.results[0].id, row1_values.join("\t")),
+        "row-1\tItem 1\tActive"
+    );
+
+    let row2_values: Vec<String> = columns
+        .iter()
+        .map(|col| resp.results[1].properties.property_text(col))
+        .collect();
+    assert_eq!(
+        format!("{}\t{}", resp.results[1].id, row2_values.join("\t")),
+        "row-2\tItem 2\tDone"
+    );
+}

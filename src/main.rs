@@ -22,6 +22,11 @@ enum Commands {
         /// Search query
         query: String,
     },
+    /// Query a Notion database
+    Query {
+        /// Database ID or Notion URL
+        database_id_or_url: String,
+    },
 }
 
 #[tokio::main]
@@ -82,6 +87,42 @@ async fn run(cli: Cli) -> Result<(), client::NotchError> {
                     &title
                 };
                 println!("{}\t{}\t{}", page.id, title, page.last_edited_time);
+            }
+        }
+        Commands::Query {
+            database_id_or_url,
+        } => {
+            let db_id = parse_page_id(&database_id_or_url)?;
+            let db = client.retrieve_database(&db_id).await?;
+
+            if db.data_sources.is_empty() {
+                return Err(client::NotchError::NoDataSources);
+            }
+
+            let ds_id = &db.data_sources[0].id;
+            let resp = client.query_data_source(ds_id).await?;
+
+            if resp.results.is_empty() {
+                eprintln!("No rows found for database: {db_id}");
+                return Ok(());
+            }
+
+            if resp.has_more {
+                eprintln!(
+                    "Warning: Results truncated. {} rows returned, more available",
+                    resp.results.len()
+                );
+            }
+
+            let columns = resp.results[0].properties.sorted_names();
+            println!("id\t{}", columns.join("\t"));
+
+            for row in &resp.results {
+                let values: Vec<String> = columns
+                    .iter()
+                    .map(|col| row.properties.property_text(col))
+                    .collect();
+                println!("{}\t{}", row.id, values.join("\t"));
             }
         }
     }

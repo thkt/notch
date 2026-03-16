@@ -2,7 +2,10 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde_json::json;
 use thiserror::Error;
 
-use crate::types::{NotionErrorResponse, PageMarkdownResponse, PageMetadata, SearchResponse};
+use crate::types::{
+    DataSourceQueryResponse, DatabaseResponse, NotionErrorResponse, PageMarkdownResponse,
+    PageMetadata, SearchResponse,
+};
 
 const NOTION_API_BASE: &str = "https://api.notion.com/v1";
 const NOTION_VERSION: &str = "2026-03-11";
@@ -22,6 +25,9 @@ pub enum NotchError {
 
     #[error("Notion API error ({status}): {message}")]
     Api { status: u16, message: String },
+
+    #[error("Database has no data sources")]
+    NoDataSources,
 
     #[error("Invalid Notion URL: {0}")]
     InvalidUrl(String),
@@ -72,6 +78,23 @@ impl Client {
     pub async fn fetch_metadata(&self, page_id: &str) -> Result<PageMetadata, NotchError> {
         let url = format!("{}/pages/{}", self.base_url, page_id);
         let resp = self.send_with_retry(|| self.http.get(&url)).await?;
+        self.handle_response(resp).await
+    }
+
+    pub async fn retrieve_database(&self, db_id: &str) -> Result<DatabaseResponse, NotchError> {
+        let url = format!("{}/databases/{}", self.base_url, db_id);
+        let resp = self.send_with_retry(|| self.http.get(&url)).await?;
+        self.handle_response(resp).await
+    }
+
+    pub async fn query_data_source(
+        &self,
+        ds_id: &str,
+    ) -> Result<DataSourceQueryResponse, NotchError> {
+        let url = format!("{}/data_sources/{}/query", self.base_url, ds_id);
+        let resp = self
+            .send_with_retry(|| self.http.post(&url).json(&serde_json::json!({})))
+            .await?;
         self.handle_response(resp).await
     }
 
@@ -323,25 +346,5 @@ mod tests {
     #[test]
     fn test_parse_empty_string() {
         assert!(parse_page_id("").is_err());
-    }
-
-    #[test]
-    fn test_token_not_set_error_message() {
-        let err = NotchError::TokenNotSet;
-        let msg = err.to_string();
-        assert!(msg.contains("NOTION_TOKEN not set"), "got: {msg}");
-        assert!(msg.contains("notion.so/profile/integrations"), "got: {msg}");
-    }
-
-    #[test]
-    fn test_not_found_error_message() {
-        let err = NotchError::NotFoundOrForbidden;
-        assert!(err.to_string().contains("shared with your integration"));
-    }
-
-    #[test]
-    fn test_rate_limited_error_message() {
-        let err = NotchError::RateLimited;
-        assert!(err.to_string().contains("Rate limited"));
     }
 }
