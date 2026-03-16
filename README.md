@@ -36,11 +36,12 @@ One command. Handles URL parsing, API authentication, title extraction, and Mark
 - You need Notion page content as Markdown in a terminal or script
 - You want to pipe Notion content into other tools (`notch fetch ... | grep pattern`)
 - You need to search across your Notion workspace from the command line
+- You need to query a Notion database and get rows as TSV
 
 **Use other tools when:**
 
 - You need to edit or create Notion pages — notch is read-only
-- You need database queries or filtering — notch handles pages, not databases
+- You need database filtering or sorting — notch returns the first page of results
 - You need real-time sync — notch is a one-shot fetch
 
 ## Setup
@@ -97,6 +98,7 @@ Add to your project's `CLAUDE.md`:
 
 - `notch fetch <page-id-or-url>` — Notion page to Markdown
 - `notch search "query"` — search Notion pages by title
+- `notch query <database-id-or-url>` — query Notion database rows as TSV
 ```
 
 ## Commands
@@ -140,6 +142,37 @@ notch search "spec" | while read -r id title _; do
 done
 ```
 
+### `notch query` — Query a Notion database
+
+Queries a database via the Notion Data Source API and outputs rows as TSV (tab-separated values).
+
+```sh
+notch query https://www.notion.so/My-Database-abc123def456...
+notch query abc123def456...                    # hex32 ID
+```
+
+Output format: first line is a header row, subsequent lines are data rows.
+
+```
+id	Name	Status	Date
+abc123...	Task A	Done	2026-03-15
+def456...	Task B	In Progress	2026-03-14
+```
+
+Column order: title column first, remaining columns alphabetically. First column is always the page ID.
+
+Pipe-friendly output for scripting:
+
+```sh
+notch query <db-url> | tail -n +2 | cut -f1    # page IDs only (skip header)
+notch query <db-url> | cut -f2                  # title column only
+notch query <db-url> | tail -n +2 | while IFS=$'\t' read -r id title _; do
+  notch fetch "$id" > "$title.md"
+done
+```
+
+Supported property types: title, rich_text, number, select, multi_select, date, checkbox, url, email, phone_number, status. Unsupported types output as empty.
+
 ## How it works
 
 1. **URL parsing** — Extracts page ID from Notion URLs, hex32 strings, or UUIDs. Validates domain against `notion.so` and `notion.site` (with subdomain support).
@@ -155,7 +188,7 @@ done
 src/
 ├── main.rs       CLI entry point (clap), SIGPIPE handling
 ├── client.rs     Notion API client, URL parsing, retry logic
-├── types.rs      API response types, title extraction
+├── types.rs      API response types, property extraction
 ├── sanitize.rs   Notion custom tag removal, HTML→Markdown conversion
 ├── markdown.rs   Output formatting, truncation
 └── lib.rs        Module re-exports
@@ -169,7 +202,7 @@ Single binary, zero runtime dependencies.
 | ---------------------- | -------------------------------------------------------------------------------------------------- |
 | Notion token required  | Create an integration at notion.so/profile/integrations. Pages must be shared with the integration |
 | Read-only              | No page creation or editing                                                                        |
-| No pagination          | Search returns the first page of results only                                                      |
+| No pagination          | Search and query return the first page of results only                                             |
 | Notion API rate limits | 3 requests/second per integration. notch retries on 429 automatically                              |
 | Output size cap        | 100KB max output, truncated at UTF-8 boundary                                                      |
 

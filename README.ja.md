@@ -36,11 +36,12 @@ notch fetch https://www.notion.so/My-Page-abc123def456...
 - ターミナルやスクリプトでNotionページをMarkdownとして取得したい
 - Notionの内容を他のツールにパイプしたい（`notch fetch ... | grep pattern`）
 - コマンドラインからNotionワークスペースを検索したい
+- Notionデータベースの行をTSVで取得したい
 
 **他のツールが向いているケース:**
 
 - Notionページの編集・作成 — notchは読み取り専用
-- データベースのクエリやフィルタリング — notchはページのみ対応
+- データベースのフィルタリングやソート — notchは最初のページの結果のみ返す
 - リアルタイム同期 — notchはワンショット取得
 
 ## セットアップ
@@ -97,6 +98,7 @@ export NOTION_TOKEN="ntn_..."
 
 - `notch fetch <page-id-or-url>` — Notion ページを Markdown で取得
 - `notch search "query"` — Notion ページをタイトルで検索
+- `notch query <database-id-or-url>` — Notion データベースの行を TSV で取得
 ```
 
 ## コマンド
@@ -140,6 +142,37 @@ notch search "仕様" | while read -r id title _; do
 done
 ```
 
+### `notch query` — Notion データベースクエリ
+
+Notion Data Source API経由でデータベースをクエリし、行をTSV（タブ区切り）で出力。
+
+```sh
+notch query https://www.notion.so/My-Database-abc123def456...
+notch query abc123def456...                    # hex32 ID
+```
+
+出力形式: 1行目がヘッダー、2行目以降がデータ行。
+
+```
+id	名前	ステータス	日付
+abc123...	タスクA	完了	2026-03-15
+def456...	タスクB	進行中	2026-03-14
+```
+
+カラム順: タイトル列が先頭、残りはアルファベット順。1列目は常にページID。
+
+スクリプト向けのパイプフレンドリーな出力:
+
+```sh
+notch query <db-url> | tail -n +2 | cut -f1    # ページ ID のみ（ヘッダースキップ）
+notch query <db-url> | cut -f2                  # タイトル列のみ
+notch query <db-url> | tail -n +2 | while IFS=$'\t' read -r id title _; do
+  notch fetch "$id" > "$title.md"
+done
+```
+
+対応プロパティ型: title, rich_text, number, select, multi_select, date, checkbox, url, email, phone_number, status。未対応型は空文字として出力。
+
 ## 仕組み
 
 1. **URL パース** — Notion URL、hex32文字列、UUIDからページIDを抽出。`notion.so` と `notion.site`（サブドメイン対応）に対してドメインを検証。
@@ -155,7 +188,7 @@ done
 src/
 ├── main.rs       CLI エントリポイント（clap）、SIGPIPE 処理
 ├── client.rs     Notion API クライアント、URL パース、リトライロジック
-├── types.rs      API レスポンス型、タイトル抽出
+├── types.rs      API レスポンス型、プロパティ抽出
 ├── sanitize.rs   Notion カスタムタグ除去、HTML→Markdown 変換
 ├── markdown.rs   出力フォーマット、切り詰め
 └── lib.rs        モジュール再エクスポート
@@ -169,7 +202,7 @@ src/
 | --------------------- | ------------------------------------------------------------------------------------------------- |
 | Notion トークンが必要 | notion.so/profile/integrations でインテグレーションを作成。ページをインテグレーションに共有が必要 |
 | 読み取り専用          | ページの作成・編集は不可                                                                          |
-| ページネーションなし  | 検索は最初のページの結果のみ返す                                                                  |
+| ページネーションなし  | 検索・クエリは最初のページの結果のみ返す                                                          |
 | Notion API レート制限 | インテグレーションあたり 3 リクエスト/秒。429 は自動リトライ                                      |
 | 出力サイズ上限        | 最大 100KB、UTF-8 境界で切り詰め                                                                  |
 
