@@ -470,7 +470,10 @@ async fn test_query_e2e_retrieve_then_query() {
     let db = client.retrieve_database("e2e-db").await.unwrap();
     assert_eq!(db.data_sources[0].id, "e2e-ds");
 
-    let resp = client.query_data_source(&db.data_sources[0].id).await.unwrap();
+    let resp = client
+        .query_data_source(&db.data_sources[0].id)
+        .await
+        .unwrap();
     assert_eq!(resp.results.len(), 2);
 
     // Verify TSV output structure

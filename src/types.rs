@@ -41,13 +41,7 @@ impl PageProperties {
             "rich_text" => extract_rich_text_array(value, "rich_text"),
             "number" => value
                 .get("number")
-                .and_then(|n| {
-                    if n.is_null() {
-                        None
-                    } else {
-                        n.as_f64()
-                    }
-                })
+                .and_then(|n| if n.is_null() { None } else { n.as_f64() })
                 .map(format_number)
                 .unwrap_or_default(),
             "select" | "status" => value
