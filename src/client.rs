@@ -32,6 +32,12 @@ pub enum NotchError {
     #[error("Invalid Notion URL: {0}")]
     InvalidUrl(String),
 
+    #[error("{0}")]
+    InvalidInput(String),
+
+    #[error("Failed to read stdin: {0}")]
+    Io(#[from] std::io::Error),
+
     #[error(transparent)]
     Http(#[from] reqwest::Error),
 }

@@ -86,7 +86,8 @@ fn test_property_text_status() {
 // T-012: FR-007 — multi_select プロパティ
 #[test]
 fn test_property_text_multi_select() {
-    let json = r#"{"Tags": {"type": "multi_select", "multi_select": [{"name": "A"}, {"name": "B"}]}}"#;
+    let json =
+        r#"{"Tags": {"type": "multi_select", "multi_select": [{"name": "A"}, {"name": "B"}]}}"#;
     let props: PageProperties = serde_json::from_str(json).unwrap();
     assert_eq!(props.property_text("Tags"), "A, B");
 }
@@ -102,7 +103,8 @@ fn test_property_text_date() {
 // T-014: FR-008 — date range
 #[test]
 fn test_property_text_date_range() {
-    let json = r#"{"Period": {"type": "date", "date": {"start": "2026-03-16", "end": "2026-03-20"}}}"#;
+    let json =
+        r#"{"Period": {"type": "date", "date": {"start": "2026-03-16", "end": "2026-03-20"}}}"#;
     let props: PageProperties = serde_json::from_str(json).unwrap();
     assert_eq!(props.property_text("Period"), "2026-03-16 → 2026-03-20");
 }
@@ -150,8 +152,7 @@ fn test_property_text_phone() {
 // T-020: FR-011 — 未対応型は空文字列
 #[test]
 fn test_property_text_unsupported_type() {
-    let json =
-        r#"{"Calc": {"type": "formula", "formula": {"type": "string", "string": "x"}}}"#;
+    let json = r#"{"Calc": {"type": "formula", "formula": {"type": "string", "string": "x"}}}"#;
     let props: PageProperties = serde_json::from_str(json).unwrap();
     assert_eq!(props.property_text("Calc"), "");
 }
@@ -275,4 +276,3 @@ fn test_property_text_newline_in_value() {
     let props: PageProperties = serde_json::from_str(json).unwrap();
     assert_eq!(props.property_text("Name"), "line1 line2");
 }
-
