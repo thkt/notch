@@ -112,6 +112,7 @@ notch fetch https://www.notion.so/My-Page-abc123def456...
 notch fetch abc123def456...                    # hex32 ID
 notch fetch 12345678-1234-1234-1234-1234567890ab  # UUID
 echo "abc123def456..." | notch fetch           # stdin
+notch fetch -                                  # explicit stdin
 ```
 
 Accepts Notion URLs (with or without `www`, `notion.site` subdomains, `?p=` query params), raw UUIDs, and 32-character hex IDs.
@@ -151,6 +152,7 @@ Queries a database via the Notion Data Source API and outputs rows as TSV (tab-s
 notch query https://www.notion.so/My-Database-abc123def456...
 notch query abc123def456...                    # hex32 ID
 echo "abc123def456..." | notch query           # stdin
+notch query -                                  # explicit stdin
 ```
 
 Output format: first line is a header row, subsequent lines are data rows.

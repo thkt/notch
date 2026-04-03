@@ -279,6 +279,26 @@ mod tests {
     }
 
     #[test]
+    fn resolve_resource_input_rejects_empty_stdin_with_dash() {
+        let err =
+            resolve_resource_input(Some("-".to_string()), Cursor::new(Vec::<u8>::new()), true)
+                .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "No input provided. Pass an ID/URL argument or pipe one via stdin"
+        );
+    }
+
+    #[test]
+    fn resolve_resource_input_rejects_empty_piped_stdin() {
+        let err = resolve_resource_input(None, Cursor::new(Vec::<u8>::new()), false).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "No input provided. Pass an ID/URL argument or pipe one via stdin"
+        );
+    }
+
+    #[test]
     fn cli_parses_optional_stdin_inputs() {
         assert_eq!(parse_fetch(&["notch", "fetch", "-"]).as_deref(), Some("-"));
         assert_eq!(parse_fetch(&["notch", "fetch"]), None);
