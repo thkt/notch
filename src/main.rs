@@ -1,4 +1,7 @@
-use std::io::{IsTerminal, Read};
+use std::{
+    io::{self, IsTerminal, Read, Write},
+    process,
+};
 
 use clap::{Parser, Subcommand};
 
@@ -57,16 +60,16 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
-    #[cfg(unix)]
-    unsafe {
-        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-    }
-
     let cli = Cli::parse();
 
     if let Err(e) = run(cli).await {
+        if let client::NotchError::Io(ref io_err) = e {
+            if io_err.kind() == io::ErrorKind::BrokenPipe {
+                process::exit(0);
+            }
+        }
         eprintln!("Error: {e}");
-        std::process::exit(1);
+        process::exit(1);
     }
 }
 
@@ -75,7 +78,7 @@ async fn run(cli: Cli) -> Result<(), client::NotchError> {
 
     match cli.command {
         Commands::Fetch { page_id_or_url } => {
-            let stdin = std::io::stdin();
+            let stdin = io::stdin();
             let page_id_or_url =
                 resolve_resource_input(page_id_or_url, stdin.lock(), stdin.is_terminal())?;
             let page_id = parse_page_id(&page_id_or_url)?;
@@ -98,7 +101,7 @@ async fn run(cli: Cli) -> Result<(), client::NotchError> {
                 eprintln!("{warning}");
             }
 
-            print!("{}", result.stdout);
+            io::stdout().write_all(result.stdout.as_bytes())?;
         }
         Commands::Search { query } => {
             let resp = client.search(&query).await?;
@@ -115,11 +118,17 @@ async fn run(cli: Cli) -> Result<(), client::NotchError> {
                 } else {
                     &title
                 };
-                println!("{}\t{}\t{}", page.id, title, page.last_edited_time);
+                writeln!(
+                    io::stdout(),
+                    "{}\t{}\t{}",
+                    page.id,
+                    title,
+                    page.last_edited_time
+                )?;
             }
         }
         Commands::Query { database_id_or_url } => {
-            let stdin = std::io::stdin();
+            let stdin = io::stdin();
             let database_id_or_url =
                 resolve_resource_input(database_id_or_url, stdin.lock(), stdin.is_terminal())?;
             let db_id = parse_page_id(&database_id_or_url)?;
@@ -145,14 +154,14 @@ async fn run(cli: Cli) -> Result<(), client::NotchError> {
             }
 
             let columns = resp.results[0].properties.sorted_names();
-            println!("id\t{}", columns.join("\t"));
+            writeln!(io::stdout(), "id\t{}", columns.join("\t"))?;
 
             for row in &resp.results {
                 let values: Vec<String> = columns
                     .iter()
                     .map(|col| row.properties.property_text(col))
                     .collect();
-                println!("{}\t{}", row.id, values.join("\t"));
+                writeln!(io::stdout(), "{}\t{}", row.id, values.join("\t"))?;
             }
         }
     }
@@ -170,7 +179,7 @@ fn resolve_resource_input(
         Some(_) => read_stdin_value(&mut stdin),
         None if stdin_is_terminal => Err(client::NotchError::InvalidInput(
             "Missing ID/URL argument. Pipe one via stdin or pass `-` to read stdin interactively"
-                .to_string(),
+                .to_owned(),
         )),
         None => read_stdin_value(&mut stdin),
     }
@@ -183,11 +192,11 @@ fn read_stdin_value(mut stdin: impl Read) -> Result<String, client::NotchError> 
     let trimmed = buffer.trim();
     if trimmed.is_empty() {
         return Err(client::NotchError::InvalidInput(
-            "No input provided. Pass an ID/URL argument or pipe one via stdin".to_string(),
+            "No input provided. Pass an ID/URL argument or pipe one via stdin".to_owned(),
         ));
     }
 
-    Ok(trimmed.to_string())
+    Ok(trimmed.to_owned())
 }
 
 #[cfg(test)]
@@ -235,6 +244,7 @@ mod tests {
         }
     }
 
+    // T-068: subcommand_help — fetch/search/query にサンプルが含まれる
     #[test]
     fn subcommand_help_includes_examples() {
         for (name, snippets) in [
@@ -252,6 +262,7 @@ mod tests {
         }
     }
 
+    // T-069: resolve_resource_input — 位置引数・パイプ stdin・"-" の各ケース
     #[test]
     fn resolve_resource_input_handles_positional_and_stdin_cases() {
         for (input, stdin, stdin_is_terminal, expected) in [
@@ -269,6 +280,7 @@ mod tests {
         }
     }
 
+    // T-070: resolve_resource_input — TTY で引数なしはエラー
     #[test]
     fn resolve_resource_input_rejects_missing_argument_on_tty() {
         let err = resolve_resource_input(None, Cursor::new(Vec::<u8>::new()), true).unwrap_err();
@@ -278,17 +290,18 @@ mod tests {
         );
     }
 
+    // T-071: resolve_resource_input — "-" で空 stdin はエラー
     #[test]
     fn resolve_resource_input_rejects_empty_stdin_with_dash() {
-        let err =
-            resolve_resource_input(Some("-".to_string()), Cursor::new(Vec::<u8>::new()), true)
-                .unwrap_err();
+        let err = resolve_resource_input(Some("-".to_owned()), Cursor::new(Vec::<u8>::new()), true)
+            .unwrap_err();
         assert_eq!(
             err.to_string(),
             "No input provided. Pass an ID/URL argument or pipe one via stdin"
         );
     }
 
+    // T-072: resolve_resource_input — パイプ stdin が空のときエラー
     #[test]
     fn resolve_resource_input_rejects_empty_piped_stdin() {
         let err = resolve_resource_input(None, Cursor::new(Vec::<u8>::new()), false).unwrap_err();
@@ -298,6 +311,7 @@ mod tests {
         );
     }
 
+    // T-073: cli — fetch/query で "-" と引数なしを正しくパースする
     #[test]
     fn cli_parses_optional_stdin_inputs() {
         assert_eq!(parse_fetch(&["notch", "fetch", "-"]).as_deref(), Some("-"));
@@ -306,6 +320,7 @@ mod tests {
         assert_eq!(parse_query(&["notch", "query"]), None);
     }
 
+    // T-074: cli — 全サブコマンドの after_help に Examples が含まれる
     #[test]
     fn all_subcommands_have_examples_in_after_help() {
         let command = Cli::command();
@@ -313,7 +328,7 @@ mod tests {
         for sub in command.get_subcommands() {
             let after_help = sub
                 .get_after_help()
-                .map(|help| help.to_string())
+                .map(ToString::to_string)
                 .unwrap_or_default();
 
             assert!(

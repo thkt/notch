@@ -49,7 +49,7 @@ impl PageProperties {
                 .and_then(|s| s.get("name"))
                 .and_then(|n| n.as_str())
                 .unwrap_or_default()
-                .to_string(),
+                .to_owned(),
             "multi_select" => value
                 .get("multi_select")
                 .and_then(|a| a.as_array())
@@ -69,12 +69,12 @@ impl PageProperties {
                 let end = date.and_then(|d| d.get("end")).and_then(|e| e.as_str());
                 match end {
                     Some(e) => format!("{start} → {e}"),
-                    None => start.to_string(),
+                    None => start.to_owned(),
                 }
             }
             "checkbox" => value
                 .get("checkbox")
-                .and_then(|c| c.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .map(|b| b.to_string())
                 .unwrap_or_default(),
             "url" => extract_string_field(value, "url"),
@@ -98,10 +98,10 @@ impl PageProperties {
         others.sort_unstable();
         let mut result = Vec::with_capacity(self.0.len());
         if let Some(title) = title_key {
-            result.push(title.to_string());
+            result.push(title.to_owned());
         }
         for key in others {
-            result.push(key.to_string());
+            result.push(key.to_owned());
         }
         result
     }
@@ -124,17 +124,19 @@ fn extract_string_field(value: &serde_json::Value, field: &str) -> String {
         .get(field)
         .and_then(|s| s.as_str())
         .unwrap_or_default()
-        .to_string()
+        .to_owned()
 }
 
 fn sanitize_value(s: &str) -> String {
     if s.contains(['\t', '\n', '\r']) {
         s.replace(['\t', '\n', '\r'], " ")
     } else {
-        s.to_string()
+        s.to_owned()
     }
 }
 
+// Range-checked above: `(i64::MIN as f64..=i64::MAX as f64).contains(&n)` ensures n fits in i64
+#[allow(clippy::cast_possible_truncation)]
 fn format_number(n: f64) -> String {
     if n.fract() == 0.0 && (i64::MIN as f64..=i64::MAX as f64).contains(&n) {
         (n as i64).to_string()
@@ -189,5 +191,4 @@ pub struct NotionErrorResponse {
 }
 
 #[cfg(test)]
-#[path = "types_tests.rs"]
 mod tests;

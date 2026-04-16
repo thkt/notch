@@ -1,11 +1,13 @@
 use super::*;
 
+// T-031: title_text — プロパティが空のとき空文字列を返す
 #[test]
 fn test_title_text_empty_properties() {
     let props: PageProperties = serde_json::from_str("{}").unwrap();
     assert_eq!(props.title_text(), "");
 }
 
+// T-032: title_text — title type を持つプロパティがないとき空文字列
 #[test]
 fn test_title_text_no_title_type() {
     let props: PageProperties =
@@ -13,6 +15,7 @@ fn test_title_text_no_title_type() {
     assert_eq!(props.title_text(), "");
 }
 
+// T-033: title_text — カスタムキー名でも title type を検出する
 #[test]
 fn test_title_text_with_custom_name() {
     let json = r#"{"Name": {"type": "title", "title": [{"plain_text": "My Page"}]}}"#;
@@ -20,6 +23,7 @@ fn test_title_text_with_custom_name() {
     assert_eq!(props.title_text(), "My Page");
 }
 
+// T-034: title_text — 複数セグメントを結合する
 #[test]
 fn test_title_text_multi_segment() {
     let json = r#"{"Title": {"type": "title", "title": [{"plain_text": "Hello "}, {"plain_text": "World"}]}}"#;
@@ -157,7 +161,7 @@ fn test_property_text_unsupported_type() {
     assert_eq!(props.property_text("Calc"), "");
 }
 
-// T-020 supplement: 存在しないキー
+// T-035: property_text — 存在しないキーは空文字列を返す
 #[test]
 fn test_property_text_missing_key() {
     let props: PageProperties = serde_json::from_str("{}").unwrap();
@@ -178,7 +182,11 @@ fn test_database_response_deserialize() {
 fn test_database_response_empty_data_sources() {
     let json = r#"{"data_sources": []}"#;
     let resp: DatabaseResponse = serde_json::from_str(json).unwrap();
-    assert!(resp.data_sources.is_empty());
+    assert!(
+        resp.data_sources.is_empty(),
+        "expected empty, got: {:?}",
+        resp.data_sources
+    );
 }
 
 // T-003 prep: DataSourceQueryResponse デシリアライズ

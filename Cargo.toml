@@ -15,11 +15,29 @@ serde_json = "1.0.149"
 thiserror = "2.0.18"
 url = "2.5.8"
 
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
 [dev-dependencies]
 wiremock = "0.6.5"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+# フルパス使用検出
+absolute_paths = "deny"
+# Rustイディオム (RUST.md idioms table)
+cast_possible_truncation = "deny"
+redundant_closure_for_method_calls = "deny"
+filter_map_next = "deny"
+flat_map_option = "deny"
+manual_filter_map = "deny"
+manual_find_map = "deny"
+# インポート
+wildcard_imports = "deny"
+enum_glob_use = "deny"
+# 文字列
+str_to_string = "deny"
+# 引数
+needless_pass_by_value = "deny"
 
 [profile.release]
 opt-level = 3

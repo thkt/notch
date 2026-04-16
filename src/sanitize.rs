@@ -70,7 +70,7 @@ fn split_code_segments(input: &str) -> Vec<Segment<'_>> {
 
 /// Sanitize non-code text segments.
 fn sanitize_text(input: &str) -> String {
-    let mut s = input.to_string();
+    let mut s = input.to_owned();
 
     // Table conversion must run first: it produces markdown that later
     // steps (span stripping, br removal) would otherwise miss inside cells.
@@ -114,7 +114,7 @@ fn replace_tag(s: &mut String, tag_name: &str, replacement: impl Fn(&str) -> Str
         let Some(end) = find_tag_end(s, start, tag_name) else {
             break;
         };
-        let tag = s[start..end].to_string();
+        let tag = s[start..end].to_owned();
         let repl = replacement(&tag);
         let repl_len = repl.len();
         s.replace_range(start..end, &repl);
@@ -128,8 +128,8 @@ fn convert_mentions_mut(s: &mut String) {
         let url = extract_attr(tag, "url").unwrap_or_default();
         format!("[Notion page]({url})")
     });
-    replace_tag(s, "mention-user", |_| "@user".to_string());
-    replace_tag(s, "file", |_| "[attachment]".to_string());
+    replace_tag(s, "mention-user", |_| "@user".to_owned());
+    replace_tag(s, "file", |_| "[attachment]".to_owned());
 }
 
 /// Find the end position (exclusive) of a tag, handling self-closing and paired tags.
@@ -160,7 +160,7 @@ fn extract_attr(tag: &str, attr: &str) -> Option<String> {
     let start = tag.find(&pattern)?;
     let value_start = start + pattern.len();
     let value_end = tag[value_start..].find('"')?;
-    Some(tag[value_start..value_start + value_end].to_string())
+    Some(tag[value_start..value_start + value_end].to_owned())
 }
 
 /// Strip <span color="...">text</span> → text, in-place.
@@ -172,7 +172,7 @@ fn strip_span_tags_mut(s: &mut String) {
         let tag_end = start + gt + 1;
 
         if let Some(close) = s[tag_end..].find("</span>") {
-            let content = s[tag_end..tag_end + close].to_string();
+            let content = s[tag_end..tag_end + close].to_owned();
             s.replace_range(start..tag_end + close + 7, &content);
         } else {
             s.replace_range(start..tag_end, "");
@@ -203,7 +203,7 @@ fn strip_curly_from_line(line: &str) -> Cow<'_, str> {
     if let Some(brace_start) = trimmed.rfind('{') {
         let after_brace = &trimmed[brace_start..];
         if after_brace.ends_with('}') && after_brace.contains('=') {
-            return Cow::Owned(trimmed[..brace_start].trim_end().to_string());
+            return Cow::Owned(trimmed[..brace_start].trim_end().to_owned());
         }
     }
     Cow::Borrowed(line)
@@ -292,7 +292,7 @@ fn parse_table_rows(html: &str) -> Vec<Vec<String>> {
 
 /// Render a 2D string grid as a Markdown pipe table.
 fn render_pipe_table(rows: &[Vec<String>]) -> String {
-    let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let col_count = rows.iter().map(Vec::len).max().unwrap_or(0);
     let mut lines = Vec::with_capacity(rows.len() + 1);
 
     for (i, row) in rows.iter().enumerate() {
@@ -315,7 +315,7 @@ fn remove_colgroup(html: &str) -> Cow<'_, str> {
     if !html.contains("<colgroup>") {
         return Cow::Borrowed(html);
     }
-    let mut s = html.to_string();
+    let mut s = html.to_owned();
     while let Some(start) = s.find("<colgroup>") {
         if let Some(end) = s[start..].find("</colgroup>") {
             s.replace_range(start..start + end + 11, "");
@@ -353,10 +353,10 @@ fn clean_cell_content(content: &str) -> String {
     let trimmed = content.trim();
     // Fast path: no special markers
     if !trimmed.contains('<') && !trimmed.contains('|') {
-        return trimmed.to_string();
+        return trimmed.to_owned();
     }
 
-    let mut s = trimmed.to_string();
+    let mut s = trimmed.to_owned();
     if s.contains("<span ") {
         strip_span_tags_mut(&mut s);
     }
@@ -367,7 +367,7 @@ fn clean_cell_content(content: &str) -> String {
     if s.contains('|') {
         s = s.replace('|', r"\|");
     }
-    s.trim().to_string()
+    s.trim().to_owned()
 }
 
 /// Strip <details>/<summary> tags, converting to **summary** + content.
@@ -429,7 +429,7 @@ fn convert_details_content(inner: &str) -> String {
         }
     }
     // No summary — just return content
-    trimmed.to_string()
+    trimmed.to_owned()
 }
 
 /// Strip <callout> tags, extracting icon attribute if present.
@@ -449,7 +449,7 @@ fn strip_callout_mut(s: &mut String) {
         let content = s[content_start..content_start + close_offset].trim();
         let replacement = match icon {
             Some(i) => format!("{i} {content}"),
-            None => content.to_string(),
+            None => content.to_owned(),
         };
         let end = content_start + close_offset + 10;
         s.replace_range(start..end, &replacement);
@@ -472,7 +472,7 @@ fn strip_wrapper_tag_mut(s: &mut String, tag: &str) {
         };
         let content = s[content_start..content_start + close_offset]
             .trim()
-            .to_string();
+            .to_owned();
         let end = content_start + close_offset + close.len();
         s.replace_range(start..end, &content);
     }
@@ -520,7 +520,7 @@ fn extract_columns(html: &str) -> Vec<String> {
     while let Some(col_start) = remaining.find("<column>") {
         let after = &remaining[col_start + 8..]; // 8 = "<column>".len()
         if let Some(col_end) = after.find("</column>") {
-            columns.push(after[..col_end].trim().to_string());
+            columns.push(after[..col_end].trim().to_owned());
             remaining = &after[col_end + 9..]; // 9 = "</column>".len()
         } else {
             break;
@@ -534,9 +534,9 @@ fn convert_checkboxes_mut(s: &mut String) {
     replace_tag(s, "checkbox", |tag| {
         let checked = extract_attr(tag, "checked").unwrap_or_default();
         if checked == "true" {
-            "[x] ".to_string()
+            "[x] ".to_owned()
         } else {
-            "[ ] ".to_string()
+            "[ ] ".to_owned()
         }
     });
 }
@@ -679,9 +679,9 @@ mod tests {
     fn test_basic_table_conversion() {
         let input = "<table>\n<tr>\n<td>A</td>\n<td>B</td>\n</tr>\n<tr>\n<td>1</td>\n<td>2</td>\n</tr>\n</table>";
         let result = sanitize(input);
-        assert!(result.contains("| A | B |"));
-        assert!(result.contains("| --- | --- |"));
-        assert!(result.contains("| 1 | 2 |"));
+        assert!(result.contains("| A | B |"), "got: {result}");
+        assert!(result.contains("| --- | --- |"), "got: {result}");
+        assert!(result.contains("| 1 | 2 |"), "got: {result}");
     }
 
     // T-013: FR-011 — テーブルセル内パイプエスケープ
@@ -689,7 +689,7 @@ mod tests {
     fn test_table_cell_pipe_escaped() {
         let input = "<table>\n<tr>\n<td>H</td>\n</tr>\n<tr>\n<td>a|b</td>\n</tr>\n</table>";
         let result = sanitize(input);
-        assert!(result.contains(r"a\|b"));
+        assert!(result.contains(r"a\|b"), "got: {result}");
     }
 
     // T-014: FR-012 — テーブルセル内 br 除去
@@ -697,7 +697,7 @@ mod tests {
     fn test_table_cell_br_removed() {
         let input = "<table>\n<tr>\n<td>H</td>\n</tr>\n<tr>\n<td>a<br>b</td>\n</tr>\n</table>";
         let result = sanitize(input);
-        assert!(result.contains("a b"));
+        assert!(result.contains("a b"), "got: {result}");
     }
 
     // T-015: FR-013 — テーブルセル内 span 除去
@@ -705,7 +705,7 @@ mod tests {
     fn test_table_cell_span_removed() {
         let input = "<table>\n<tr>\n<td>H</td>\n</tr>\n<tr>\n<td><span color=\"red\">x</span></td>\n</tr>\n</table>";
         let result = sanitize(input);
-        assert!(result.contains("| x |"));
+        assert!(result.contains("| x |"), "got: {result}");
     }
 
     // T-016: FR-010 — テーブル内 colgroup 除去
@@ -713,8 +713,8 @@ mod tests {
     fn test_table_colgroup_removed() {
         let input = "<table>\n<colgroup>\n<col>\n<col>\n</colgroup>\n<tr>\n<td>A</td>\n<td>B</td>\n</tr>\n</table>";
         let result = sanitize(input);
-        assert!(result.contains("| A | B |"));
-        assert!(!result.contains("colgroup"));
+        assert!(result.contains("| A | B |"), "got: {result}");
+        assert!(!result.contains("colgroup"), "got: {result}");
     }
 
     // T-017: FR-010 — テーブルセル属性除去
@@ -722,15 +722,15 @@ mod tests {
     fn test_table_cell_attribute_removed() {
         let input = "<table>\n<tr>\n<td color=\"yellow_bg\">text</td>\n</tr>\n</table>";
         let result = sanitize(input);
-        assert!(result.contains("| text |"));
+        assert!(result.contains("| text |"), "got: {result}");
     }
 
     // T-018: FR-010 — 空テーブル
     #[test]
     fn test_empty_table() {
         let result = sanitize("<table>\n</table>");
-        assert!(!result.contains("table"));
-        assert!(result.trim().is_empty());
+        assert!(!result.contains("table"), "got: {result}");
+        assert!(result.trim().is_empty(), "got: {result:?}");
     }
 
     // T-019: FR-010 — 1列テーブル
@@ -738,9 +738,9 @@ mod tests {
     fn test_single_column_table() {
         let input = "<table>\n<tr>\n<td>H</td>\n</tr>\n<tr>\n<td>V</td>\n</tr>\n</table>";
         let result = sanitize(input);
-        assert!(result.contains("| H |"));
-        assert!(result.contains("| --- |"));
-        assert!(result.contains("| V |"));
+        assert!(result.contains("| H |"), "got: {result}");
+        assert!(result.contains("| --- |"), "got: {result}");
+        assert!(result.contains("| V |"), "got: {result}");
     }
 
     // T-020: FR-014 — コードブロック内保護
@@ -748,8 +748,8 @@ mod tests {
     fn test_code_block_preserved() {
         let input = "before\n```\n{color=\"red\"}\n<empty-block/>\n```\nafter";
         let result = sanitize(input);
-        assert!(result.contains("{color=\"red\"}"));
-        assert!(result.contains("<empty-block/>"));
+        assert!(result.contains("{color=\"red\"}"), "got: {result}");
+        assert!(result.contains("<empty-block/>"), "got: {result}");
     }
 
     // T-021: FR-015 — インラインコード内保護
@@ -757,7 +757,7 @@ mod tests {
     fn test_inline_code_preserved() {
         let input = "use `<empty-block/>` tag";
         let result = sanitize(input);
-        assert!(result.contains("`<empty-block/>`"));
+        assert!(result.contains("`<empty-block/>`"), "got: {result}");
     }
 
     // T-022: FR-016 — 連続空行の正規化
@@ -778,7 +778,7 @@ mod tests {
     fn test_malformed_tag_survives() {
         let input = "<span color=\"red\">no close";
         let result = sanitize(input);
-        assert!(result.contains("no close"));
+        assert!(result.contains("no close"), "got: {result}");
     }
 
     // T-025: ALL — 複合パターン
@@ -793,13 +793,16 @@ mod tests {
             "<empty-block/>"
         );
         let result = sanitize(input);
-        assert!(!result.contains("{color="));
-        assert!(result.contains("[Notion page](https://notion.so/page1)"));
-        assert!(result.contains("warning"));
-        assert!(!result.contains("<span"));
-        assert!(result.contains("| Col |"));
-        assert!(!result.contains("X-Amz-Algorithm"));
-        assert!(!result.contains("<empty-block/>"));
+        assert!(!result.contains("{color="), "got: {result}");
+        assert!(
+            result.contains("[Notion page](https://notion.so/page1)"),
+            "got: {result}"
+        );
+        assert!(result.contains("warning"), "got: {result}");
+        assert!(!result.contains("<span"), "got: {result}");
+        assert!(result.contains("| Col |"), "got: {result}");
+        assert!(!result.contains("X-Amz-Algorithm"), "got: {result}");
+        assert!(!result.contains("<empty-block/>"), "got: {result}");
     }
 
     // === v2: LLM コンテキスト最適化 ===
@@ -825,10 +828,10 @@ mod tests {
         let input =
             "<details><summary>外</summary><details><summary>内</summary>X</details></details>";
         let result = sanitize(input);
-        assert!(result.contains("**外**"));
-        assert!(result.contains("**内**"));
-        assert!(result.contains("X"));
-        assert!(!result.contains("<details"));
+        assert!(result.contains("**外**"), "got: {result}");
+        assert!(result.contains("**内**"), "got: {result}");
+        assert!(result.contains("X"), "got: {result}");
+        assert!(!result.contains("<details"), "got: {result}");
     }
 
     // T-030: FR-019 — details マルチラインコンテンツ
@@ -836,10 +839,10 @@ mod tests {
     fn test_details_multiline() {
         let input = "<details>\n<summary>タイトル</summary>\n\n- item1\n- item2\n\n</details>";
         let result = sanitize(input);
-        assert!(result.contains("**タイトル**"));
-        assert!(result.contains("- item1"));
-        assert!(result.contains("- item2"));
-        assert!(!result.contains("<details"));
+        assert!(result.contains("**タイトル**"), "got: {result}");
+        assert!(result.contains("- item1"), "got: {result}");
+        assert!(result.contains("- item2"), "got: {result}");
+        assert!(!result.contains("<details"), "got: {result}");
     }
 
     // T-031: FR-022 — callout を icon + 中身に変換
@@ -938,8 +941,8 @@ mod tests {
     fn test_code_block_preserves_v2_tags() {
         let input = "```\n<checkbox checked=\"true\"/>\n<callout icon=\"💡\">test</callout>\n```";
         let result = sanitize(input);
-        assert!(result.contains("<checkbox"));
-        assert!(result.contains("<callout"));
+        assert!(result.contains("<checkbox"), "got: {result}");
+        assert!(result.contains("<callout"), "got: {result}");
     }
 
     // T-043: FR-034 — details 内に table がある複合パターン
@@ -948,10 +951,10 @@ mod tests {
         let input =
             "<details><summary>T</summary>\n<table>\n<tr>\n<td>A</td>\n</tr>\n</table>\n</details>";
         let result = sanitize(input);
-        assert!(result.contains("**T**"));
-        assert!(result.contains("| A |"));
-        assert!(!result.contains("<details"));
-        assert!(!result.contains("<table"));
+        assert!(result.contains("**T**"), "got: {result}");
+        assert!(result.contains("| A |"), "got: {result}");
+        assert!(!result.contains("<details"), "got: {result}");
+        assert!(!result.contains("<table"), "got: {result}");
     }
 
     // T-044: ALL — v1+v2 全混合複合パターン
@@ -968,17 +971,23 @@ mod tests {
             "<bookmark url=\"https://example.com\">リンク</bookmark>"
         );
         let result = sanitize(input);
-        assert!(!result.contains("{color="));
-        assert!(result.contains("**詳細**"));
-        assert!(result.contains("💡 重要"));
-        assert!(result.contains("[x] タスク"));
-        assert!(result.contains("$E=mc^2$"));
-        assert!(result.contains("[Notion page](https://notion.so/page1)"));
-        assert!(result.contains("[リンク](https://example.com)"));
-        assert!(!result.contains("<details"));
-        assert!(!result.contains("<callout"));
-        assert!(!result.contains("<checkbox"));
-        assert!(!result.contains("<equation"));
-        assert!(!result.contains("<bookmark"));
+        assert!(!result.contains("{color="), "got: {result}");
+        assert!(result.contains("**詳細**"), "got: {result}");
+        assert!(result.contains("💡 重要"), "got: {result}");
+        assert!(result.contains("[x] タスク"), "got: {result}");
+        assert!(result.contains("$E=mc^2$"), "got: {result}");
+        assert!(
+            result.contains("[Notion page](https://notion.so/page1)"),
+            "got: {result}"
+        );
+        assert!(
+            result.contains("[リンク](https://example.com)"),
+            "got: {result}"
+        );
+        assert!(!result.contains("<details"), "got: {result}");
+        assert!(!result.contains("<callout"), "got: {result}");
+        assert!(!result.contains("<checkbox"), "got: {result}");
+        assert!(!result.contains("<equation"), "got: {result}");
+        assert!(!result.contains("<bookmark"), "got: {result}");
     }
 }
