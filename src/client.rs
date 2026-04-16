@@ -1,6 +1,10 @@
+use std::{env, io, time::Duration};
+
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use serde::de::DeserializeOwned;
 use serde_json::json;
 use thiserror::Error;
+use tokio::time::sleep;
 
 use crate::types::{
     DataSourceQueryResponse, DatabaseResponse, NotionErrorResponse, PageMarkdownResponse,
@@ -36,7 +40,7 @@ pub enum NotchError {
     InvalidInput(String),
 
     #[error("Failed to read stdin: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
 
     #[error(transparent)]
     Http(#[from] reqwest::Error),
@@ -50,12 +54,12 @@ pub struct Client {
 
 impl Client {
     pub fn new() -> Result<Self, NotchError> {
-        let token = std::env::var("NOTION_TOKEN").map_err(|_| NotchError::TokenNotSet)?;
-        Self::with_token(token, NOTION_API_BASE.to_string())
+        let token = env::var("NOTION_TOKEN").map_err(|_| NotchError::TokenNotSet)?;
+        Self::with_token(&token, NOTION_API_BASE.to_owned())
     }
 
     #[doc(hidden)]
-    pub fn with_token(token: String, base_url: String) -> Result<Self, NotchError> {
+    pub fn with_token(token: &str, base_url: String) -> Result<Self, NotchError> {
         let mut headers = HeaderMap::new();
         headers.insert(
             AUTHORIZATION,
@@ -69,7 +73,7 @@ impl Client {
         let http = reqwest::Client::builder()
             .default_headers(headers)
             .user_agent(concat!("notch/", env!("CARGO_PKG_VERSION")))
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(Duration::from_secs(30))
             .build()?;
 
         Ok(Self { http, base_url })
@@ -133,11 +137,11 @@ impl Client {
                         .and_then(|v| v.to_str().ok())
                         .and_then(|v| v.parse::<u64>().ok())
                         .unwrap_or(1);
-                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                    sleep(Duration::from_secs(wait)).await;
                 }
                 500..=599 => {
                     let wait_ms = 100u64 << attempt; // 100ms, 200ms, 400ms
-                    tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+                    sleep(Duration::from_millis(wait_ms)).await;
                 }
                 _ => return Ok(resp),
             }
@@ -145,7 +149,7 @@ impl Client {
         Ok(build_request().send().await?)
     }
 
-    async fn handle_response<T: serde::de::DeserializeOwned>(
+    async fn handle_response<T: DeserializeOwned>(
         &self,
         resp: reqwest::Response,
     ) -> Result<T, NotchError> {
@@ -160,7 +164,7 @@ impl Client {
             _ => {
                 let err: NotionErrorResponse = resp.json().await.unwrap_or(NotionErrorResponse {
                     status,
-                    code: "unknown".to_string(),
+                    code: "unknown".to_owned(),
                     message: format!("HTTP {status}"),
                 });
                 Err(NotchError::Api {
@@ -174,14 +178,14 @@ impl Client {
 
 pub fn parse_page_id(input: &str) -> Result<String, NotchError> {
     if is_uuid(input) {
-        return Ok(input.to_string());
+        return Ok(input.to_owned());
     }
 
     if is_hex32(input) {
         return Ok(format_uuid(input));
     }
 
-    let parsed = url::Url::parse(input).map_err(|_| NotchError::InvalidUrl(input.to_string()))?;
+    let parsed = url::Url::parse(input).map_err(|_| NotchError::InvalidUrl(input.to_owned()))?;
 
     let host = parsed.host_str().unwrap_or("");
     let is_notion = host == "notion.so"
@@ -189,14 +193,14 @@ pub fn parse_page_id(input: &str) -> Result<String, NotchError> {
         || host == "notion.site"
         || host.ends_with(".notion.site");
     if !is_notion {
-        return Err(NotchError::InvalidUrl(input.to_string()));
+        return Err(NotchError::InvalidUrl(input.to_owned()));
     }
 
     let path = parsed.path();
     let last_segment = path.rsplit('/').next().unwrap_or("");
 
     if is_uuid(last_segment) {
-        return Ok(last_segment.to_string());
+        return Ok(last_segment.to_owned());
     }
 
     if let Some(hex) = extract_hex32_suffix(last_segment) {
@@ -209,7 +213,7 @@ pub fn parse_page_id(input: &str) -> Result<String, NotchError> {
         }
     }
 
-    Err(NotchError::InvalidUrl(input.to_string()))
+    Err(NotchError::InvalidUrl(input.to_owned()))
 }
 
 fn is_uuid(s: &str) -> bool {
@@ -254,12 +258,14 @@ fn extract_hex32_suffix(s: &str) -> Option<&str> {
 mod tests {
     use super::*;
 
+    // T-041: parse_page_id — UUID 形式をそのまま返す
     #[test]
     fn test_parse_uuid_direct() {
         let id = "12345678-1234-1234-1234-123456789abc";
         assert_eq!(parse_page_id(id).unwrap(), id);
     }
 
+    // T-042: parse_page_id — 32桁 hex を UUID 形式に変換する
     #[test]
     fn test_parse_hex32() {
         let hex = "123456781234123412341234567890ab";
@@ -269,6 +275,7 @@ mod tests {
         );
     }
 
+    // T-043: parse_page_id — notion.so URL のタイトル付きパスから ID を抽出
     #[test]
     fn test_parse_notion_url_with_title() {
         let url = "https://www.notion.so/My-Page-Title-123456781234123412341234567890ab";
@@ -278,6 +285,7 @@ mod tests {
         );
     }
 
+    // T-044: parse_page_id — ワークスペース付き URL から ID を抽出
     #[test]
     fn test_parse_notion_url_with_workspace() {
         let url = "https://www.notion.so/workspace/123456781234123412341234567890ab";
@@ -287,6 +295,7 @@ mod tests {
         );
     }
 
+    // T-045: parse_page_id — クエリパラメータ ?p= から ID を抽出
     #[test]
     fn test_parse_notion_url_with_query_param() {
         let url = "https://www.notion.so/page?p=123456781234123412341234567890ab";
@@ -296,11 +305,13 @@ mod tests {
         );
     }
 
+    // T-046: parse_page_id — notion 以外のドメインはエラー
     #[test]
     fn test_parse_invalid_url() {
         assert!(parse_page_id("https://example.com/page").is_err());
     }
 
+    // T-047: parse_page_id — evil-notion.so など類似ドメインを拒否する
     #[test]
     fn test_parse_spoofed_domain_rejected() {
         assert!(
@@ -308,11 +319,13 @@ mod tests {
         );
     }
 
+    // T-048: parse_page_id — UUID でも hex32 でも URL でもない文字列はエラー
     #[test]
     fn test_parse_invalid_string() {
         assert!(parse_page_id("not-a-valid-id").is_err());
     }
 
+    // T-049: parse_page_id — notion.site サブドメイン URL から ID を抽出
     #[test]
     fn test_parse_notion_site_url() {
         let url = "https://myworkspace.notion.site/Page-123456781234123412341234567890ab";
@@ -322,6 +335,7 @@ mod tests {
         );
     }
 
+    // T-050: parse_page_id — www なし notion.so URL から ID を抽出
     #[test]
     fn test_parse_notion_url_without_www() {
         let url = "https://notion.so/Page-123456781234123412341234567890ab";
@@ -331,6 +345,7 @@ mod tests {
         );
     }
 
+    // T-051: parse_page_id — URL フラグメント付きでも ID を抽出する
     #[test]
     fn test_parse_notion_url_with_fragment() {
         let url = "https://www.notion.so/Page-123456781234123412341234567890ab#section";
@@ -340,6 +355,7 @@ mod tests {
         );
     }
 
+    // T-052: parse_page_id — パスが UUID そのものの URL から ID を抽出
     #[test]
     fn test_parse_notion_url_with_uuid_in_path() {
         let url = "https://www.notion.so/12345678-1234-1234-1234-1234567890ab";
@@ -349,6 +365,7 @@ mod tests {
         );
     }
 
+    // T-053: parse_page_id — 空文字列はエラー
     #[test]
     fn test_parse_empty_string() {
         assert!(parse_page_id("").is_err());

@@ -4,9 +4,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use notch::client::{Client, NotchError};
 
 fn test_client(base_url: &str) -> Client {
-    Client::with_token("test-token".into(), format!("{base_url}/v1")).unwrap()
+    Client::with_token("test-token", format!("{base_url}/v1")).unwrap()
 }
 
+// T-054: fetch_markdown — 200 OK のとき markdown を返す
 #[tokio::test]
 async fn test_fetch_markdown_success() {
     let server = MockServer::start().await;
@@ -29,6 +30,7 @@ async fn test_fetch_markdown_success() {
     assert!(!resp.truncated);
 }
 
+// T-055: fetch_markdown — truncated=true と unknown_block_ids を返す
 #[tokio::test]
 async fn test_fetch_markdown_truncated() {
     let server = MockServer::start().await;
@@ -50,6 +52,7 @@ async fn test_fetch_markdown_truncated() {
     assert_eq!(resp.unknown_block_ids, vec!["block-1"]);
 }
 
+// T-056: fetch_metadata — title プロパティを複数セグメントから結合する
 #[tokio::test]
 async fn test_fetch_metadata_title_extraction() {
     let server = MockServer::start().await;
@@ -77,6 +80,7 @@ async fn test_fetch_metadata_title_extraction() {
     assert_eq!(meta.properties.title_text(), "My Page");
 }
 
+// T-057: fetch_markdown — 404 は NotFoundOrForbidden を返す
 #[tokio::test]
 async fn test_fetch_404_returns_not_found() {
     let server = MockServer::start().await;
@@ -94,9 +98,13 @@ async fn test_fetch_404_returns_not_found() {
     let client = test_client(&server.uri());
     let err = client.fetch_markdown("missing-id").await.unwrap_err();
 
-    assert!(matches!(err, NotchError::NotFoundOrForbidden));
+    assert!(
+        matches!(err, NotchError::NotFoundOrForbidden),
+        "got: {err:?}"
+    );
 }
 
+// T-058: fetch_markdown — 403 は NotFoundOrForbidden を返す
 #[tokio::test]
 async fn test_fetch_403_returns_not_found() {
     let server = MockServer::start().await;
@@ -114,9 +122,13 @@ async fn test_fetch_403_returns_not_found() {
     let client = test_client(&server.uri());
     let err = client.fetch_markdown("forbidden-id").await.unwrap_err();
 
-    assert!(matches!(err, NotchError::NotFoundOrForbidden));
+    assert!(
+        matches!(err, NotchError::NotFoundOrForbidden),
+        "got: {err:?}"
+    );
 }
 
+// T-059: fetch_markdown — 429 は RateLimited を返す（リトライ後）
 #[tokio::test]
 async fn test_fetch_429_returns_rate_limited() {
     let server = MockServer::start().await;
@@ -138,9 +150,10 @@ async fn test_fetch_429_returns_rate_limited() {
     let client = test_client(&server.uri());
     let err = client.fetch_markdown("any-id").await.unwrap_err();
 
-    assert!(matches!(err, NotchError::RateLimited));
+    assert!(matches!(err, NotchError::RateLimited), "got: {err:?}");
 }
 
+// T-060: search — 検索結果のページリストを返す
 #[tokio::test]
 async fn test_search_returns_pages() {
     let server = MockServer::start().await;
@@ -175,6 +188,7 @@ async fn test_search_returns_pages() {
     assert_eq!(resp.results[0].last_edited_time, "2026-03-13T10:00:00.000Z");
 }
 
+// T-061: search — リクエストに page フィルターが含まれる
 #[tokio::test]
 async fn test_search_sends_page_filter() {
     let server = MockServer::start().await;
@@ -197,9 +211,14 @@ async fn test_search_sends_page_filter() {
 
     let client = test_client(&server.uri());
     let resp = client.search("anything").await.unwrap();
-    assert!(resp.results.is_empty());
+    assert!(
+        resp.results.is_empty(),
+        "expected empty, got: {:?}",
+        resp.results
+    );
 }
 
+// T-062: fetch_markdown — 500 は Api エラーを返す
 #[tokio::test]
 async fn test_fetch_500_returns_api_error() {
     let server = MockServer::start().await;
@@ -217,9 +236,13 @@ async fn test_fetch_500_returns_api_error() {
     let client = test_client(&server.uri());
     let err = client.fetch_markdown("error-id").await.unwrap_err();
 
-    assert!(matches!(err, NotchError::Api { status: 500, .. }));
+    assert!(
+        matches!(err, NotchError::Api { status: 500, .. }),
+        "got: {err:?}"
+    );
 }
 
+// T-063: fetch_markdown — 502 + HTML ボディのとき "HTTP 502" にフォールバック
 #[tokio::test]
 async fn test_fetch_502_html_body_fallback() {
     let server = MockServer::start().await;
@@ -242,6 +265,7 @@ async fn test_fetch_502_html_body_fallback() {
     }
 }
 
+// T-064: fetch_markdown — 200 + 不正 JSON は Http エラーを返す
 #[tokio::test]
 async fn test_fetch_200_malformed_json() {
     let server = MockServer::start().await;
@@ -255,9 +279,10 @@ async fn test_fetch_200_malformed_json() {
     let client = test_client(&server.uri());
     let err = client.fetch_markdown("broken").await.unwrap_err();
 
-    assert!(matches!(err, NotchError::Http(_)));
+    assert!(matches!(err, NotchError::Http(_)), "got: {err:?}");
 }
 
+// T-065: search — 400 は Api エラーを返す
 #[tokio::test]
 async fn test_search_error_returns_api_error() {
     let server = MockServer::start().await;
@@ -275,9 +300,13 @@ async fn test_search_error_returns_api_error() {
     let client = test_client(&server.uri());
     let err = client.search("test").await.unwrap_err();
 
-    assert!(matches!(err, NotchError::Api { status: 400, .. }));
+    assert!(
+        matches!(err, NotchError::Api { status: 400, .. }),
+        "got: {err:?}"
+    );
 }
 
+// T-066: fetch_metadata — 404 は NotFoundOrForbidden を返す
 #[tokio::test]
 async fn test_fetch_metadata_404_returns_not_found() {
     let server = MockServer::start().await;
@@ -295,9 +324,13 @@ async fn test_fetch_metadata_404_returns_not_found() {
     let client = test_client(&server.uri());
     let err = client.fetch_metadata("missing-id").await.unwrap_err();
 
-    assert!(matches!(err, NotchError::NotFoundOrForbidden));
+    assert!(
+        matches!(err, NotchError::NotFoundOrForbidden),
+        "got: {err:?}"
+    );
 }
 
+// T-067: fetch_markdown — 429 後にリトライして成功する
 #[tokio::test]
 async fn test_fetch_retries_on_429_then_succeeds() {
     let server = MockServer::start().await;
@@ -367,7 +400,10 @@ async fn test_retrieve_database_404() {
     let client = test_client(&server.uri());
     let err = client.retrieve_database("missing-db").await.unwrap_err();
 
-    assert!(matches!(err, NotchError::NotFoundOrForbidden));
+    assert!(
+        matches!(err, NotchError::NotFoundOrForbidden),
+        "got: {err:?}"
+    );
 }
 
 // T-003: FR-003 — query_data_source が行を返す
@@ -421,7 +457,11 @@ async fn test_query_data_source_empty_results() {
     let client = test_client(&server.uri());
     let resp = client.query_data_source("ds-empty").await.unwrap();
 
-    assert!(resp.results.is_empty());
+    assert!(
+        resp.results.is_empty(),
+        "expected empty, got: {:?}",
+        resp.results
+    );
 }
 
 // T-025: FR-001 — E2E: retrieve DB → query data source → TSV 検証
