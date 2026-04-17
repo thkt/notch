@@ -271,7 +271,7 @@ mod tests {
             (None, "abc123\n", false, "abc123"),
         ] {
             let value = resolve_resource_input(
-                input.map(str::to_string),
+                input.map(str::to_owned),
                 Cursor::new(stdin.as_bytes()),
                 stdin_is_terminal,
             )
