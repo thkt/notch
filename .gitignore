@@ -1,4 +1,7 @@
-/target
-.claude
-.playwright-cli
+.DS_Store
+.yomu/
+.claude/
+.playwright-cli/
+docs/
+target/
 workspace/
