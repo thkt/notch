@@ -62,5 +62,11 @@ jobs:
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
       - name: Deny check
         run: cargo deny check
+
+      - name: Audit
+        run: cargo audit
